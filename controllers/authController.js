@@ -7,14 +7,14 @@ const connect = async (req, res) => {
     const { code } = req.query;
 
     try {
-        let result = 'Logged In';
+        let result = '';
         if (!code) {
             result = `${stravaBaseUrl}/oauth/authorize?client_id=${process.env.STRAVA_CLIENT_ID}&response_type=code&redirect_uri=${process.env.STRAVA_REDIRECT_URI}&approval_prompt=force&scope=activity:read_all,activity:write`;
         } else {
             const response = await axios.post(`${stravaBaseUrl}/oauth/token`, {
                 client_id: process.env.STRAVA_CLIENT_ID,
                 client_secret: process.env.STRAVA_CLIENT_SECRET,
-                code: code,
+                code,
                 grant_type: 'authorization_code'
             });
             const { access_token, refresh_token, expires_at } = response.data;
@@ -35,6 +35,7 @@ const connect = async (req, res) => {
                 },
                 { new: true, upsert: true, setDefaultsOnInsert: true }
             );
+            result = access_token;
         }
 
         res.status(201).send({ message: 'Strava connected successfully', result });
@@ -77,7 +78,6 @@ const disconnect = async (req, res) => {
 };
 
 const webhook = async (req, res) => {
-    console.log('webhook event received!', req.query, req.body);
     const { aspect_type, object_type, object_id, owner_id } = req.body;
     try {
         if (aspect_type === 'create' && object_type === 'activity') {
@@ -89,6 +89,21 @@ const webhook = async (req, res) => {
                     }
                 });
                 if (response.data) {
+                    const existingActivity = account.activities.find(activity => activity.id === response.data.id);
+                    if (!existingActivity) {
+                        account.activities.push({ 
+                            id: response.data.id, 
+                            name: response.data.name, 
+                            distance: response.data.distance, 
+                            type: response.data.type, 
+                            sport_type: response.data.sport_type, 
+                            start_date: response.data.start_date, 
+                            elapsed_time: response.data.elapsed_time, 
+                            description: response.data.description 
+                        });
+                        await account.save();
+                    }
+
                     const activity = await Activity.findOne({ activity_id: response.data.id });
                     if (!activity) {
                         const newActivity = new Activity({
